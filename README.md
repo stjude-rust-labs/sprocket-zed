@@ -64,25 +64,25 @@ key:
 {
   "lsp": {
     "sprocket": {
-      "binary": {
-        "path": "/path/to/sprocket"
-      },
-      "settings": {
-        "lint": true,
-        "outputLevel": "verbose",
-        "checkForUpdates": true
+      "binaryPath": "/path/to/sprocket",
+      "checkForUpdates": true,
+      "server": {
+        "logLevel": "verbose",
+        "lint": {
+          "enabled": true
+        }
       }
     }
   }
 }
 ```
 
-| Setting | Type | Default | Description |
-|-|-|-|-|
-| `binary.path` | `string` | — | Path to a locally installed Sprocket binary |
-| `lint` | `bool` | `false` | Enable additional linting checks |
-| `outputLevel` | `string` | `"quiet"` | Server output level: `"quiet"`, `"verbose"`, or `"trace"` |
-| `checkForUpdates` | `bool` | `true` | Check for new Sprocket releases on startup |
+| Setting               | Type     | Default   | Description                                                                 |
+|-----------------------|----------|-----------|-----------------------------------------------------------------------------|
+| `binaryPath`          | `string` | —         | Path to a locally installed Sprocket binary                                 |
+| `checkForUpdates`     | `bool`   | `true`    | Check for new Sprocket releases on startup                                  |
+| `server.logLevel`     | `string` | `"error"` | Server output level: `"quiet"`, `"warn"`, `"info"`, `"debug"`, or `"trace"` |
+| `server.lint.enabled` | `bool`   | `false`   | Enable additional linting checks                                            |
 
 ## 📝 License and Legal
 

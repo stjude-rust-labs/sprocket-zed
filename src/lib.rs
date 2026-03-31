@@ -1,9 +1,10 @@
 use std::fs;
 
-use zed::settings::LspSettings;
 use zed::LanguageServerId;
 use zed::Result;
+use zed::settings::LspSettings;
 use zed_extension_api as zed;
+use zed_extension_api::serde_json;
 
 struct SprocketExtension {
     cached_binary_path: Option<String>,
@@ -45,10 +46,10 @@ impl SprocketExtension {
         let lsp_settings = LspSettings::for_worktree("sprocket", worktree)?;
 
         // 1. User-configured binary path — no version management.
-        if let Some(binary) = &lsp_settings.binary {
-            if let Some(path) = &binary.path {
-                return Ok(path.clone());
-            }
+        if let Some(settings) = &lsp_settings.settings
+            && let Some(binary_path) = settings.get("binaryPath").and_then(|v| v.as_str())
+        {
+            return Ok(binary_path.to_string());
         }
 
         // 2. System PATH — no version management.
@@ -95,7 +96,7 @@ impl SprocketExtension {
                 return Err("Sprocket does not provide prebuilt 32-bit x86 binaries; \
                      please build from source (https://github.com/stjude-rust-labs/sprocket) \
                      and set the `binary.path` option in your Zed settings"
-                    .into())
+                    .into());
             }
         };
 
@@ -182,22 +183,26 @@ impl zed::Extension for SprocketExtension {
 
         let mut args = vec!["analyzer".to_string(), "--stdio".to_string()];
 
-        if let Some(settings) = &lsp_settings.settings {
-            if settings
-                .get("lint")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-            {
-                args.push("--lint".to_string());
+        if let Some(settings) = &lsp_settings.settings
+            && let Some(server_settings) = settings.get("server")
+        {
+            if let Some(lint_options) = server_settings.get("lint") {
+                if lint_options.get("enabled").and_then(|v| v.as_bool()) == Some(true) {
+                    args.push("--lint".to_string());
+                }
             }
 
-            match settings
-                .get("outputLevel")
+            match server_settings
+                .get("logLevel")
                 .and_then(|v| v.as_str())
-                .unwrap_or("quiet")
+                .map(|level| level.to_lowercase())
+                .as_deref()
             {
-                "verbose" => args.push("-v".to_string()),
-                "trace" => args.push("-vv".to_string()),
+                Some("trace") => args.push("-vvv".to_string()),
+                Some("debug") => args.push("-vv".to_string()),
+                Some("info") => args.push("-v".to_string()),
+                Some("warn") => {}
+                Some("error") | None => args.push("-q".to_string()),
                 _ => {}
             }
         }
@@ -207,6 +212,24 @@ impl zed::Extension for SprocketExtension {
             args,
             env: Default::default(),
         })
+    }
+
+    fn language_server_workspace_configuration(
+        &mut self,
+        _language_server_id: &LanguageServerId,
+        worktree: &zed_extension_api::Worktree,
+    ) -> Result<Option<zed_extension_api::serde_json::Value>> {
+        let lsp_settings = LspSettings::for_worktree("sprocket", worktree)?;
+
+        if let Some(settings) = lsp_settings.settings
+            && let Some(server_settings) = settings.get("server")
+        {
+            return Ok(Some(serde_json::json!({
+                "sprocket.server": server_settings
+            })));
+        }
+
+        Ok(None)
     }
 }
 
