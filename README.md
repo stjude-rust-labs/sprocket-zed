@@ -81,7 +81,7 @@ key:
 |-----------------------|----------|-----------|-----------------------------------------------------------------------------|
 | `binaryPath`          | `string` | —         | Path to a locally installed Sprocket binary                                 |
 | `checkForUpdates`     | `bool`   | `true`    | Check for new Sprocket releases on startup                                  |
-| `server.logLevel`     | `string` | `"error"` | Server output level: `"quiet"`, `"warn"`, `"info"`, `"debug"`, or `"trace"` |
+| `server.logLevel`     | `string` | `"error"` | Server output level: `"error"`, `"warn"`, `"info"`, `"debug"`, or `"trace"` |
 | `server.lint.enabled` | `bool`   | `false`   | Enable additional linting checks                                            |
 
 ## 📝 License and Legal
