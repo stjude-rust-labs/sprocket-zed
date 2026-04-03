@@ -11,3 +11,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 zed_extension_api = "0.7.0"
+serde = { version = "1.0.228", features = ["derive"] }

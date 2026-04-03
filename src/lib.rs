@@ -1,5 +1,7 @@
+use std::fmt::Formatter;
 use std::fs;
 
+use serde::{Deserialize, Deserializer, Serialize};
 use zed::LanguageServerId;
 use zed::Result;
 use zed::settings::LspSettings;
@@ -43,12 +45,10 @@ impl SprocketExtension {
         language_server_id: &LanguageServerId,
         worktree: &zed::Worktree,
     ) -> Result<String> {
-        let lsp_settings = LspSettings::for_worktree("sprocket", worktree)?;
+        let settings = Settings::load(&worktree)?;
 
         // 1. User-configured binary path — no version management.
-        if let Some(settings) = &lsp_settings.settings
-            && let Some(binary_path) = settings.get("binaryPath").and_then(|v| v.as_str())
-        {
+        if let Some(binary_path) = settings.binary_path {
             return Ok(binary_path.to_string());
         }
 
@@ -58,16 +58,9 @@ impl SprocketExtension {
         }
 
         // 3. Zed-managed binary — install or update as needed.
-        let check_for_updates = lsp_settings
-            .settings
-            .as_ref()
-            .and_then(|s| s.get("checkForUpdates"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-
         let installed = self.installed_binary_path();
 
-        if !check_for_updates {
+        if !settings.check_for_updates {
             if let Some(path) = installed {
                 self.cached_binary_path = Some(path.clone());
                 return Ok(path);
@@ -95,7 +88,7 @@ impl SprocketExtension {
             zed::Architecture::X86 => {
                 return Err("Sprocket does not provide prebuilt 32-bit x86 binaries; \
                      please build from source (https://github.com/stjude-rust-labs/sprocket) \
-                     and set the `binary.path` option in your Zed settings"
+                     and set the `binaryPath` option in your Zed settings"
                     .into());
             }
         };
@@ -166,6 +159,99 @@ impl SprocketExtension {
     }
 }
 
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct Settings {
+    binary_path: Option<String>,
+    check_for_updates: bool,
+    server: ServerSettings,
+}
+
+impl Settings {
+    fn load(worktree: &zed_extension_api::Worktree) -> Result<Self> {
+        let lsp_settings = LspSettings::for_worktree("sprocket", worktree)?;
+
+        Ok(lsp_settings
+            .settings
+            .map(|lsp_settings| {
+                serde_json::from_value::<Settings>(lsp_settings)
+                    .map_err(|e| format!("failed to parse settings: {e}"))
+            })
+            .transpose()?
+            .unwrap_or_default())
+    }
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    #[default]
+    Error,
+}
+
+impl LogLevel {
+    const VARIANTS: &[&str] = &["trace", "debug", "info", "warn", "error"];
+}
+
+impl<'de> Deserialize<'de> for LogLevel {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct LogLevelVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for LogLevelVisitor {
+            type Value = LogLevel;
+
+            fn expecting(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+                write!(formatter, "a log level string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match v.to_lowercase().as_str() {
+                    "trace" => Ok(LogLevel::Trace),
+                    "debug" => Ok(LogLevel::Debug),
+                    "info" => Ok(LogLevel::Info),
+                    "warn" => Ok(LogLevel::Warn),
+                    "error" => Ok(LogLevel::Error),
+                    _ => Err(serde::de::Error::unknown_variant(v, LogLevel::VARIANTS)),
+                }
+            }
+        }
+
+        deserializer.deserialize_str(LogLevelVisitor)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct ServerSettings {
+    log_level: LogLevel,
+    lint: LintSettings,
+}
+
+impl Default for ServerSettings {
+    fn default() -> Self {
+        Self {
+            log_level: LogLevel::Error,
+            lint: LintSettings::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct LintSettings {
+    enabled: bool,
+}
+
 impl zed::Extension for SprocketExtension {
     fn new() -> Self {
         Self {
@@ -179,32 +265,20 @@ impl zed::Extension for SprocketExtension {
         worktree: &zed::Worktree,
     ) -> Result<zed::Command> {
         let binary_path = self.language_server_binary_path(language_server_id, worktree)?;
-        let lsp_settings = LspSettings::for_worktree("sprocket", worktree)?;
+        let settings = Settings::load(&worktree)?;
 
         let mut args = vec!["analyzer".to_string(), "--stdio".to_string()];
 
-        if let Some(settings) = &lsp_settings.settings
-            && let Some(server_settings) = settings.get("server")
-        {
-            if let Some(lint_options) = server_settings.get("lint") {
-                if lint_options.get("enabled").and_then(|v| v.as_bool()) == Some(true) {
-                    args.push("--lint".to_string());
-                }
-            }
+        if settings.server.lint.enabled {
+            args.push("--lint".to_string());
+        }
 
-            match server_settings
-                .get("logLevel")
-                .and_then(|v| v.as_str())
-                .map(|level| level.to_lowercase())
-                .as_deref()
-            {
-                Some("trace") => args.push("-vvv".to_string()),
-                Some("debug") => args.push("-vv".to_string()),
-                Some("info") => args.push("-v".to_string()),
-                Some("warn") => {}
-                Some("error") | None => args.push("-q".to_string()),
-                _ => {}
-            }
+        match settings.server.log_level {
+            LogLevel::Trace => args.push("-vvv".to_string()),
+            LogLevel::Debug => args.push("-vv".to_string()),
+            LogLevel::Info => args.push("-v".to_string()),
+            LogLevel::Warn => {}
+            LogLevel::Error => args.push("-q".to_string()),
         }
 
         Ok(zed::Command {
@@ -219,17 +293,11 @@ impl zed::Extension for SprocketExtension {
         _language_server_id: &LanguageServerId,
         worktree: &zed_extension_api::Worktree,
     ) -> Result<Option<zed_extension_api::serde_json::Value>> {
-        let lsp_settings = LspSettings::for_worktree("sprocket", worktree)?;
+        let settings = Settings::load(&worktree)?;
 
-        if let Some(settings) = lsp_settings.settings
-            && let Some(server_settings) = settings.get("server")
-        {
-            return Ok(Some(serde_json::json!({
-                "sprocket.server": server_settings
-            })));
-        }
-
-        Ok(None)
+        return Ok(Some(serde_json::json!({
+            "sprocket.server": settings.server
+        })));
     }
 }
 

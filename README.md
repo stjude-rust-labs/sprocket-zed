@@ -53,7 +53,7 @@ the [Sprocket](https://github.com/stjude-rust-labs/sprocket) language server.
 The extension will automatically download the latest
 [Sprocket](https://github.com/stjude-rust-labs/sprocket/releases) release. To
 use a locally installed binary instead, ensure `sprocket` is on your `PATH` or
-set the `binary.path` option below.
+set the `binaryPath` option below.
 
 ### Configuration
 
@@ -67,7 +67,7 @@ key:
       "binaryPath": "/path/to/sprocket",
       "checkForUpdates": true,
       "server": {
-        "logLevel": "verbose",
+        "logLevel": "info",
         "lint": {
           "enabled": true
         }
